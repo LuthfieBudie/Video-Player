@@ -12,16 +12,20 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - uses: android-actions/setup-android@v3
 
@@ -36,7 +40,7 @@ jobs:
 
       - name: Pasang ikon & splash
         run: |
-          pip install pillow
+          python -m pip install pillow
           python make-android-icons.py android/app/src/main/res
 
       - name: Sinkron
