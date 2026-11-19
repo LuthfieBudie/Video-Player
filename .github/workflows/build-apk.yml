@@ -27,7 +27,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: android-actions/setup-android@v3
+      # Android SDK sudah terpasang di server GitHub (ubuntu-latest), tinggal dicek
+      - name: Cek Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" || true
 
       - name: Install Capacitor
         run: npm install
