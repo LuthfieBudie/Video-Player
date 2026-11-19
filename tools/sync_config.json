@@ -1,0 +1,24 @@
+{
+  "accounts": [
+    {
+      "name": "akun1",
+      "folders": [
+        "https://drive.google.com/drive/folders/1P9eL7bzRoKgJ4Z85z8ctFE1W-FKg2TNx",
+        "https://drive.google.com/drive/folders/1whwrufbsAT6RotXQn_zm-Cv-6X2h0AAp"
+      ],
+      "use_starred": true
+    },
+    {
+      "name": "akun2",
+      "folders": [],
+      "use_starred": true
+    }
+  ],
+  "favorite_folder_names": [
+    "favorit",
+    "favorite",
+    "favorites",
+    "favourite"
+  ],
+  "output": "videos.json"
+}

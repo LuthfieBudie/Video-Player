@@ -1,0 +1,14 @@
+{
+  "appId": "io.github.luthfiebudie.videogallery",
+  "appName": "Video Gallery",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0e0e10"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "LIGHT"
+    }
+  }
+}
