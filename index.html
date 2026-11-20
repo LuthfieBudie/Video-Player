@@ -69,14 +69,26 @@
   <button data-nav="profil"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</button>
 </nav>
 
-<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+<div class="modal player" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
   <div class="box">
-    <div class="screen" id="screen"></div>
-    <div class="info"><div class="grow"><h2 id="mTitle"></h2><small id="mSub"></small></div>
-      <button class="close" id="pPrev" aria-label="Previous video"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
-      <button class="close" id="pNext" aria-label="Next video"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
-      <button class="close" id="pAdd" aria-label="Save to playlist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7M18 14v8M14 18h8"/></svg></button>
-      <button class="close" id="close" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="p-main">
+      <div class="p-top">
+        <button class="close" id="close" aria-label="Close player"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="p-count" id="pCount"></span>
+      </div>
+      <div class="screen" id="screen"></div>
+      <div class="info">
+        <h2 id="mTitle"></h2>
+        <div class="p-sub" id="mSub"></div>
+        <div class="p-ctrl">
+          <button class="p-btn" id="pPrev" aria-label="Previous video"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg><span>Previous</span></button>
+          <button class="p-btn like" id="pFav" aria-label="Favorite" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Like</span></button>
+          <button class="p-btn" id="pAdd" aria-label="Save to playlist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7M18 14v8M14 18h8"/></svg><span>Save</span></button>
+          <button class="p-btn" id="pNext" aria-label="Next video"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg><span>Next</span></button>
+        </div>
+      </div>
+    </div>
+    <aside class="upnext" id="upnext"><h3>Up next</h3><div class="up-list" id="upList"></div></aside>
   </div>
 </div>
 

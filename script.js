@@ -80,7 +80,7 @@ async function listChildren(folderId, keyStart) {
   do {
     const data = await api({
       q: `'${folderId}' in parents and trashed = false and (mimeType contains 'video/' or mimeType = '${FOLDER}' or mimeType = '${SHORTCUT}')`,
-      fields: "nextPageToken,files(id,name,mimeType,createdTime,modifiedTime,videoMediaMetadata(durationMillis),shortcutDetails(targetId,targetMimeType))",
+      fields: "nextPageToken,files(id,name,mimeType,createdTime,modifiedTime,thumbnailLink,videoMediaMetadata(durationMillis,width,height),shortcutDetails(targetId,targetMimeType))",
       pageSize: 1000, supportsAllDrives: true, includeItemsFromAllDrives: true,
       ...(pageToken ? { pageToken } : {})
     }, keyStart);
@@ -90,15 +90,16 @@ async function listChildren(folderId, keyStart) {
   return out;
 }
 const toVideo = (f, category) => {
-  const sc = f.mimeType === SHORTCUT;
+  const sc = f.mimeType === SHORTCUT, m = f.videoMediaMetadata || {};
   return {
     id: sc ? f.shortcutDetails.targetId : f.id,
     name: f.name.replace(/\.[a-z0-9]{2,4}$/i, ""),
     cat: category,
     created: f.createdTime || "",
     modified: f.modifiedTime || f.createdTime || "",
-    dur: f.videoMediaMetadata?.durationMillis ? +f.videoMediaMetadata.durationMillis : 0,
-    thumb: ""
+    dur: m.durationMillis ? +m.durationMillis : 0,
+    w: m.width ? +m.width : 0, h: m.height ? +m.height : 0,   // ukuran video: untuk tahu vertikal / horizontal
+    thumb: f.thumbnailLink || ""                               // thumbnail asli dari Drive (lebih cepat & akurat)
   };
 };
 const isVideoItem = f => f.mimeType.startsWith("video/") ||
@@ -121,7 +122,7 @@ async function loadDrive() {
         if (!src.has(v.id)) src.set(v.id, k);
         const old = vids.get(v.id);
         if (!old) vids.set(v.id, v);
-        else { if (!old.cat && v.cat) old.cat = v.cat; if (!old.dur) old.dur = v.dur; }
+        else { if (!old.cat && v.cat) old.cat = v.cat; if (!old.dur) old.dur = v.dur; if (!old.thumb) old.thumb = v.thumb; if (!old.w) { old.w = v.w; old.h = v.h; } }
         if (v.cat) catSet.add(v.cat);
       }
     }
@@ -142,17 +143,20 @@ async function loadDrive() {
 }
 
 /* ---------- cache (khusus mode API) ---------- */
-const ckey = () => "vg-cache-" + FOLDERS.map(id => id + ":" + (FOLDER_NAMES[id] || "")).join(",");
+const ckey = () => "vg-cache2-" + FOLDERS.map(id => id + ":" + (FOLDER_NAMES[id] || "")).join(",");
 const readCache = () => { const c = load(ckey(), null); return c && Date.now() - c.t < (CFG.CACHE_MINUTES || 10) * 60000 ? c.d : null; };
-const writeCache = d => { for (const k of Object.keys(localStorage)) if (k.startsWith("vg-cache-")) localStorage.removeItem(k); store(ckey(), { t: Date.now(), d }); };
+const writeCache = d => { for (const k of Object.keys(localStorage)) if (k.startsWith("vg-cache")) localStorage.removeItem(k); store(ckey(), { t: Date.now(), d }); };
 
 /* ---------- helpers ---------- */
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const fmtDur = ms => { if (!ms) return ""; const s = Math.round(ms / 1000), h = s / 3600 | 0, m = (s % 3600) / 60 | 0, ss = String(s % 60).padStart(2, "0"); return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`; };
 const fmtDate = d => d ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 const thumbUrl = (v, w) => v.thumb ? v.thumb.replace(/=s\d+$/, "=s" + w) : `https://drive.google.com/thumbnail?id=${encodeURIComponent(v.id)}&sz=w${w}`;
-window.vgThumbErr = img => img.remove();
-const img = (v, w, eager) => `<img src="${esc(thumbUrl(v, w))}" alt="" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" referrerpolicy="no-referrer" onerror="vgThumbErr(this)">`;
+const driveThumb = (v, w) => `https://drive.google.com/thumbnail?id=${encodeURIComponent(v.id)}&sz=w${w}`;
+// thumbnail gagal -> coba link cadangan -> kalau gagal juga, sembunyikan
+window.vgThumbErr = img => { if (img.dataset.fb) { img.src = img.dataset.fb; img.dataset.fb = ""; } else img.remove(); };
+const isTall = v => v.h > v.w && v.w > 0;
+const img = (v, w, eager) => `<img src="${esc(thumbUrl(v, w))}" data-fb="${v.thumb ? esc(driveThumb(v, w)) : ""}" alt="" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" referrerpolicy="no-referrer" onerror="vgThumbErr(this)">`;
 
 const playIco = c => `<svg width="14" height="14" viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="${c}"/></svg>`;
 const heart = `<svg width="18" height="18" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>`;
@@ -296,21 +300,20 @@ function toggleFav(id) {
   if (mode === "fav") renderAll();
 }
 
-/* ---------- player (dengan antrean: sebelumnya / berikutnya) ---------- */
+/* ---------- player (layar penuh di HP, dengan "Up next") ---------- */
 let queue = [], qi = -1;
 function openPlayer(id, list) {
   queue = list || view.map(v => v.id);
   qi = queue.indexOf(id); if (qi < 0) { queue = [id]; qi = 0; }
   showPlayer();
-  $("modal").classList.add("open"); $("close").focus();
-  if (matchMedia("(pointer: coarse)").matches && !load("vg-swipe-tip", false)) { toast("Swipe left or right to change videos"); store("vg-swipe-tip", true); }
+  $("modal").classList.add("open"); document.body.classList.add("in-player");
+  $("close").focus({ preventScroll: true });
 }
 let keyTurn = Math.random() * 97 | 0;
 function iframePlayer(v) {
   $("screen").innerHTML = `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
 }
-// putar langsung dengan <video> (autoplay + loop + bisa di-swipe) memakai API key bergiliran;
-// kalau gagal (format tidak didukung / kuota habis), otomatis pindah ke player Drive biasa
+// DIRECT_PLAY = true: putar langsung lewat API key (autoplay + loop, memakai kuota); selain itu player Drive
 function videoPlayer(v, dir) {
   if (!KEYS.length || CFG.DIRECT_PLAY === false) { iframePlayer(v); return; }
   let tries = 0;
@@ -321,7 +324,7 @@ function videoPlayer(v, dir) {
   el.addEventListener("error", () => {
     if (queue[qi] !== v.id) return;
     if (++tries < KEYS.length) { setSrc(); return; }
-    iframePlayer(v); toast("Playing with the Google Drive player (auto loop not available)");
+    iframePlayer(v); toast("Playing with the Google Drive player");
   });
   setSrc();
   el.play().catch(() => { el.muted = true; el.play().catch(() => {}); });
@@ -333,14 +336,29 @@ function step(d) {
 }
 function showPlayer(dir) {
   const v = byId.get(queue[qi]); if (!v) return;
-  $("mTitle").textContent = v.name;
   const p = mode === "playlist" ? findPl(curPl) : null;
-  $("mSub").textContent = [p ? `${p.name} · ${qi + 1}/${queue.length}` : v.cat, fmtDur(v.dur), fmtDate(v.modified || v.created)].filter(Boolean).join(" · ");
+  $("mTitle").textContent = v.name; $("mTitle").title = v.name;
+  $("mSub").innerHTML = [p ? esc(p.name) : esc(v.cat), fmtDur(v.dur), fmtDate(v.modified || v.created)].filter(Boolean).map(x => `<span>${x}</span>`).join("");
+  $("pCount").textContent = queue.length > 1 ? `${qi + 1} / ${queue.length.toLocaleString("en-US")}` : "";
+  // ukuran layar video mengikuti bentuk videonya (vertikal tidak jadi kecil)
+  $("screen").style.aspectRatio = v.w && v.h ? `${v.w} / ${v.h}` : "16 / 9";
+  $("screen").classList.toggle("tall", isTall(v));
   $("pAdd").dataset.id = v.id;
+  $("pFav").dataset.fav = v.id; const on = isFav(v.id); $("pFav").classList.toggle("on", on); $("pFav").setAttribute("aria-pressed", on);
   $("pPrev").disabled = $("pNext").disabled = queue.length < 2;
   videoPlayer(v, dir);
+  renderUpNext();
 }
-const closePlayer = () => { $("modal").classList.remove("open"); $("screen").innerHTML = ""; };
+function renderUpNext() {
+  const items = [];
+  for (let k = 1; k <= Math.min(12, queue.length - 1); k++) { const n = (qi + k) % queue.length; const v = byId.get(queue[n]); if (v) items.push([n, v]); }
+  $("upnext").hidden = !items.length;
+  $("upList").innerHTML = items.map(([n, v], k) => `<button class="up-row" data-qi="${n}">
+    <span class="up-thumb">${fallbackArt}${img(v, 320, k < 3)}${v.dur ? `<span class="dur">${fmtDur(v.dur)}</span>` : ""}</span>
+    <span class="up-txt"><b>${esc(v.name)}</b><small>${esc(v.cat)} · ${fmtDate(v.modified || v.created)}</small></span></button>`).join("");
+  $("upList").scrollTop = 0;
+}
+const closePlayer = () => { $("modal").classList.remove("open"); document.body.classList.remove("in-player"); $("screen").innerHTML = ""; };
 
 /* ---------- playlist buatan sendiri ---------- */
 let plVid = "";
@@ -505,36 +523,45 @@ let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400); }
 
 
-/* ============ SHORTS: geser atas/bawah ala TikTok ============
+/* ============ SHORTS: layar penuh ala TikTok ============
    shorts    = player langsung (autoplay + loop, geser di mana saja) -> memakai kuota Drive API
-   shortsOff = player Google Drive (tanpa kuota; ketuk untuk putar, geser di luar area video) */
+   shortsOff = player Google Drive (tanpa kuota; ketuk untuk putar)
+   Kecepatan: video berikutnya sudah dimuat duluan (preload), jadi saat digeser langsung jalan. */
 let shMode = "", shList = [], shRendered = 0, shActive = -1, shMuted = false;
-const SH_BATCH = 8;
+const SH_BATCH = 6;
 const shIco = {
-  up: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>`,
-  down: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`,
+  up: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>`,
+  down: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`,
   mute: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>`,
-  play: `<svg width="30" height="30" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`
+  play: `<svg width="34" height="34" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`,
+  heart: `<svg width="30" height="30" viewBox="0 0 24 24"><path d="M12 20.5s-8-4.9-8-11A4.5 4.5 0 0 1 12 6.6a4.5 4.5 0 0 1 8 2.9c0 6.1-8 11-8 11z"/></svg>`,
+  save: `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7M18 14v8M14 18h8"/></svg>`
 };
 
 function shSlide(v, i) {
-  const f = isFav(v.id);
-  return `<article class="sh" data-i="${i}">
-    <div class="sh-card" style="--a:${COLORS[i % COLORS.length]}">
+  const f = isFav(v.id), tall = isTall(v);
+  return `<article class="sh${tall ? " tall" : ""}" data-i="${i}">
+    <div class="sh-frame">
       <div class="sh-media" data-shmedia="${i}">
-        ${fallbackArt}${img(v, 720, i < 2)}
+        <img class="sh-bg" src="${esc(thumbUrl(v, 320))}" alt="" aria-hidden="true" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">
+        <img class="sh-poster" src="${esc(thumbUrl(v, 1080))}" data-fb="${v.thumb ? esc(driveThumb(v, 1080)) : ""}" alt="" ${i < 2 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" referrerpolicy="no-referrer" onerror="vgThumbErr(this)">
+        <div class="sh-spin" aria-hidden="true"></div>
         <button class="sh-play" data-shplay="${i}" aria-label="Play ${esc(v.name)}">${shIco.play}</button>
+        <div class="sh-burst" aria-hidden="true">${shIco.heart}</div>
       </div>
-      <div class="sh-tools">
-        <button class="fav ${f ? "on" : ""}" data-fav="${esc(v.id)}" aria-label="Favorite" aria-pressed="${f}">${heart}</button>
-        <button data-add="${esc(v.id)}" aria-label="Save to playlist">${addIco}</button>
-        <button data-act="sh-up" aria-label="Previous video">${shIco.up}</button>
-        <button data-act="sh-down" aria-label="Next video">${shIco.down}</button>
+      <div class="sh-shade" aria-hidden="true"></div>
+      <div class="sh-meta">
+        <span class="sh-cat">${esc(v.cat)}${v.dur ? " · " + fmtDur(v.dur) : ""}</span>
+        <b>${esc(v.name)}</b>
+        <small>${fmtDate(v.modified || v.created)} · ${i + 1} of ${shList.length.toLocaleString("en-US")}</small>
       </div>
+      <div class="sh-bar"><i></i></div>
     </div>
-    <div class="sh-info">
-      <div class="sh-txt"><b title="${esc(v.name)}">${esc(v.name)}</b><small>${esc(v.cat)}${v.dur ? " · " + fmtDur(v.dur) : ""} · ${fmtDate(v.modified || v.created)}</small></div>
-      <span class="sh-count">${i + 1} / ${shList.length.toLocaleString("en-US")}</span>
+    <div class="sh-side">
+      <button class="sh-act sh-like ${f ? "on" : ""}" data-fav="${esc(v.id)}" aria-label="Like" aria-pressed="${f}"><span class="ic">${shIco.heart}</span><small>Like</small></button>
+      <button class="sh-act" data-add="${esc(v.id)}" aria-label="Save to playlist"><span class="ic">${shIco.save}</span><small>Save</small></button>
+      <button class="sh-act sh-nav" data-act="sh-up" aria-label="Previous video"><span class="ic">${shIco.up}</span></button>
+      <button class="sh-act sh-nav" data-act="sh-down" aria-label="Next video"><span class="ic">${shIco.down}</span></button>
     </div>
   </article>`;
 }
@@ -551,45 +578,67 @@ const shIO = new IntersectionObserver(es => {
 function shMediaEl(i) { return $("shFeed").querySelector(`[data-shmedia="${i}"]`); }
 function shStop(i) {
   const m = shMediaEl(i); if (!m) return;
-  m.querySelectorAll("video,iframe,.sh-unmute,.sh-bar").forEach(el => { if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } el.remove(); });
-  m.classList.remove("playing", "paused");
-}
-function shActivate(i) {
-  if (i === shActive || !shList[i]) return;
-  if (shActive >= 0) shStop(shActive);
-  shActive = i;
-  if (i >= shRendered - 3) shRenderMore();
-  if (shMode === "shorts") shPlay(i);
+  m.querySelectorAll("video,iframe,.sh-unmute").forEach(el => { if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } el.remove(); });
+  m.classList.remove("playing", "paused", "loading", "ready");
+  const bar = m.closest(".sh")?.querySelector(".sh-bar i"); if (bar) bar.style.width = "0";
 }
 function shIframe(i) {
   const m = shMediaEl(i), v = shList[i]; if (!m || !v) return;
   shStop(i);
   m.insertAdjacentHTML("beforeend", `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`);
-  m.classList.add("playing");
+  m.classList.add("playing", "ready");
+}
+// buat elemen video di slide i (kalau belum ada); autoplay = putar sekarang, kalau tidak: hanya dimuat duluan
+function shEnsureVideo(i, autoplay) {
+  const m = shMediaEl(i), v = shList[i]; if (!m || !v) return null;
+  let el = m.querySelector("video");
+  if (!el) {
+    let tries = 0; const start = keyTurn++;
+    el = document.createElement("video");
+    el.playsInline = true; el.loop = true; el.preload = "auto"; el.muted = shMuted;
+    el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", "");
+    m.insertBefore(el, m.querySelector(".sh-spin"));
+    const bar = m.closest(".sh").querySelector(".sh-bar i");
+    const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
+    el.addEventListener("error", () => {
+      if (!el.isConnected) return;
+      if (++tries < KEYS.length) { setSrc(); if (shActive === i) el.play().catch(() => {}); return; }
+      el.dataset.failed = 1;
+      if (shActive === i) { shIframe(i); toast("This video is playing with the Google Drive player"); }
+    });
+    el.addEventListener("waiting", () => { if (shActive === i) m.classList.add("loading"); });
+    el.addEventListener("playing", () => m.classList.remove("loading"), { passive: true });
+    el.addEventListener("loadeddata", () => m.classList.add("ready"));
+    el.addEventListener("timeupdate", () => { if (el.duration) bar.style.width = (el.currentTime / el.duration * 100) + "%"; });
+    setSrc();
+  }
+  if (autoplay) {
+    if (el.dataset.failed) { shIframe(i); return null; }
+    m.classList.add("playing");
+    if (el.readyState < 3) m.classList.add("loading");
+    el.muted = shMuted;
+    el.play().catch(() => {
+      // browser menolak autoplay bersuara -> putar tanpa suara, tampilkan tombol suara
+      el.muted = true; shMuted = true;
+      el.play().catch(() => {});
+      if (!m.querySelector(".sh-unmute")) m.insertAdjacentHTML("beforeend", `<button class="sh-unmute" data-act="sh-unmute">${shIco.mute} Tap for sound</button>`);
+    });
+  } else { el.pause(); }
+  return el;
+}
+function shActivate(i) {
+  if (i === shActive || !shList[i]) return;
+  shActive = i;
+  if (i >= shRendered - 3) shRenderMore();
+  // hentikan semua video selain yang aktif dan satu berikutnya (hemat memori & kuota)
+  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => { const k = +m.dataset.shmedia; if (k !== i && k !== i + 1) shStop(k); else if (k !== i) m.querySelector("video")?.pause(); });
+  if (shMode === "shortsOff" || !KEYS.length) { shStop(i); return; }
+  shEnsureVideo(i, true);
+  shEnsureVideo(i + 1, false);   // preload video berikutnya supaya langsung jalan saat digeser
 }
 function shPlay(i) {
-  const m = shMediaEl(i), v = shList[i]; if (!m || !v) return;
-  if (shMode === "shortsOff" || !KEYS.length) { shIframe(i); return; }
-  shStop(i);
-  let tries = 0; const start = keyTurn++;
-  m.insertAdjacentHTML("beforeend", `<video playsinline loop autoplay preload="auto"></video><div class="sh-bar"><i></i></div>`);
-  const el = m.querySelector("video"), bar = m.querySelector(".sh-bar i");
-  const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
-  el.muted = shMuted;
-  el.addEventListener("error", () => {
-    if (shActive !== i || !el.isConnected) return;
-    if (++tries < KEYS.length) { setSrc(); el.play().catch(() => {}); return; }
-    shIframe(i); toast("This video is playing with the Google Drive player");
-  });
-  el.addEventListener("timeupdate", () => { if (el.duration) bar.style.width = (el.currentTime / el.duration * 100) + "%"; });
-  setSrc();
-  m.classList.add("playing");
-  el.play().catch(() => {
-    // browser menolak autoplay bersuara -> putar tanpa suara, tampilkan tombol suara
-    el.muted = true; shMuted = true;
-    el.play().catch(() => {});
-    if (!m.querySelector(".sh-unmute")) m.insertAdjacentHTML("beforeend", `<button class="sh-unmute" data-act="sh-unmute">${shIco.mute} Tap for sound</button>`);
-  });
+  if (shMode === "shortsOff" || !KEYS.length) shIframe(i);
+  else shEnsureVideo(i, true);
 }
 function shStep(d) {
   const feed = $("shFeed"), i = Math.max(0, Math.min(shList.length - 1, shActive + d));
@@ -600,6 +649,11 @@ function shTogglePause() {
   const m = shMediaEl(shActive), el = m?.querySelector("video"); if (!el) return;
   if (el.paused) { el.play().catch(() => {}); m.classList.remove("paused"); } else { el.pause(); m.classList.add("paused"); }
 }
+function shLikeBurst() {
+  const m = shMediaEl(shActive), v = shList[shActive]; if (!m || !v) return;
+  if (!isFav(v.id)) toggleFav(v.id);
+  const b = m.querySelector(".sh-burst"); b.classList.remove("go"); void b.offsetWidth; b.classList.add("go");
+}
 function openShorts(kind) {
   shMode = kind; nativeBars("DARK");
   $("shTitle").textContent = kind === "shorts" ? "Shorts" : "Shorts (Offline)";
@@ -608,22 +662,30 @@ function openShorts(kind) {
   $("shorts").hidden = false; document.body.classList.add("in-shorts");
   shList = shuffle([...library]); shRendered = 0; shActive = -1;
   $("shFeed").innerHTML = ""; $("shFeed").scrollTop = 0;
-  if (!shList.length) { $("shFeed").innerHTML = `<div class="empty">No videos yet.</div>`; return; }
+  if (!shList.length) { $("shFeed").innerHTML = `<div class="sh-empty">No videos yet. Add an API key and a folder in Profile.</div>`; return; }
   shRenderMore();
-  if (kind === "shortsOff" && !load("vg-shoff-tip", false)) { toast("Tap a video to play. Swipe outside the video to move."); store("vg-shoff-tip", true); }
+  if (kind === "shortsOff" && !load("vg-shoff-tip", false)) { toast("Tap a video to play. Swipe on the text or edges to move."); store("vg-shoff-tip", true); }
+  else if (kind === "shorts" && !load("vg-sh-tip", false)) { toast("Swipe up for the next video · double-tap to like"); store("vg-sh-tip", true); }
 }
 function closeShorts() {
   if ($("shorts").hidden) return;
-  if (shActive >= 0) shStop(shActive);
+  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => shStop(+m.dataset.shmedia));
   shActive = -1; shMode = "";
   $("shorts").hidden = true; document.body.classList.remove("in-shorts"); nativeBars("LIGHT");
   $("shFeed").innerHTML = "";
 }
-$("shFeed").addEventListener("click", e => {
-  if (e.target.closest("button")) return;
-  const m = e.target.closest(".sh-media");
-  if (m && shMode === "shorts" && +m.dataset.shmedia === shActive) shTogglePause();
-});
+// ketuk sekali = jeda/putar, ketuk dua kali = like (seperti TikTok)
+{
+  let tapT = 0, tapTimer;
+  $("shFeed").addEventListener("click", e => {
+    if (e.target.closest("button")) return;
+    const m = e.target.closest(".sh-media"); if (!m || +m.dataset.shmedia !== shActive) return;
+    const now = Date.now();
+    if (now - tapT < 300) { clearTimeout(tapTimer); tapT = 0; shLikeBurst(); return; }
+    tapT = now;
+    tapTimer = setTimeout(() => { if (shMode === "shorts") shTogglePause(); }, 300);
+  });
+}
 
 /* ---------- navigasi ---------- */
 function setNav(n) {
@@ -646,6 +708,7 @@ document.addEventListener("click", e => {
   if (t.dataset.cat) { cat = t.dataset.cat === cat && cat !== "All" ? "All" : t.dataset.cat; renderAll(); }
   else if (t.dataset.fav) toggleFav(t.dataset.fav);
   else if (t.dataset.add) openPlSheet(t.dataset.add);
+  else if (t.dataset.qi) { qi = +t.dataset.qi; showPlayer("next"); }
   else if (t.dataset.play) openPlayer(t.dataset.play);
   else if (t.dataset.pl) { curPl = t.dataset.pl; mode = "playlist"; renderAll(); scrollTo({ top: 0 }); }
   else if (t.dataset.nav) setNav(t.dataset.nav);
