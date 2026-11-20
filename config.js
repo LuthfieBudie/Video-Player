@@ -7,10 +7,11 @@ window.VG_CONFIG = {
   API_KEYS: [],
   FOLDERS: [],
 
-  // true = Home memutar video langsung (autoplay + loop) lewat API key -> MEMAKAI kuota Drive API.
-  // false = player Google Drive biasa (tidak memakai kuota, tanpa loop otomatis).
+  // Player bawaan untuk browser yang belum memilih di Profile -> Video player.
+  // true  = "Smooth": player buatan sendiri (tombol bisa disembunyikan, ketuk 2x = loncat 10 detik). MEMAKAI sedikit kuota API.
+  // false = "Google Drive": player bawaan Google (tanpa kuota, tampilannya tidak bisa diatur).
   // Menu Shorts selalu memakai kuota; Shorts (Offline) tidak.
-  DIRECT_PLAY: false,
+  DIRECT_PLAY: true,
 
   // Dimatikan: daftar video diambil langsung dari Drive pengunjung, bukan dari videos.json.
   VIDEOS_JSON: "",

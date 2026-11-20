@@ -313,21 +313,124 @@ let keyTurn = Math.random() * 97 | 0;
 function iframePlayer(v) {
   $("screen").innerHTML = `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
 }
-// DIRECT_PLAY = true: putar langsung lewat API key (autoplay + loop, memakai kuota); selain itu player Drive
+// Pilihan player (Profile): "smooth" = player buatan sendiri (memakai sedikit kuota API),
+// "drive" = player Google Drive (tanpa kuota, tapi tampilannya tidak bisa diatur)
+const playerPref = () => load("vg-player", CFG.DIRECT_PLAY === false ? "drive" : "smooth");
+const useSmooth = () => KEYS.length > 0 && playerPref() === "smooth";
+const vpIco = {
+  play: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`,
+  pause: `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>`,
+  vol: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`,
+  mute: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M17 9l5 6M22 9l-5 6"/></svg>`,
+  loop: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg>`,
+  fs: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>`,
+  fsOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>`
+};
+const fmtSec = t => { t = Math.max(0, t | 0); const h = t / 3600 | 0, m = (t % 3600) / 60 | 0, s2 = String(t % 60).padStart(2, "0"); return h ? `${h}:${String(m).padStart(2, "0")}:${s2}` : `${m}:${s2}`; };
+let vpLoop = load("vg-loop", true), vpRate = 1, vpHideT;
+
 function videoPlayer(v, dir) {
-  if (!KEYS.length || CFG.DIRECT_PLAY === false) { iframePlayer(v); return; }
+  if (!useSmooth()) { iframePlayer(v); return; }
   let tries = 0;
   const start = keyTurn++;
-  $("screen").innerHTML = `<video id="pv" class="${dir ? "in-" + dir : ""}" autoplay loop playsinline controls preload="auto" poster="${esc(thumbUrl(v, 1280))}"></video>`;
-  const el = $("pv");
+  $("screen").innerHTML = `<div class="vp ui-on loading ${dir ? "in-" + dir : ""}" id="vp">
+    <video id="pv" playsinline webkit-playsinline preload="auto" poster="${esc(thumbUrl(v, 1280))}"></video>
+    <div class="vp-spin" aria-hidden="true"></div>
+    <div class="vp-flash l" aria-hidden="true">« 10s</div><div class="vp-flash r" aria-hidden="true">10s »</div>
+    <div class="vp-ui">
+      <button class="vp-big" data-vp="toggle" aria-label="Play or pause">${vpIco.pause}</button>
+      <div class="vp-bottom">
+        <div class="vp-track"><div class="vp-buf"></div><input class="vp-seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek"></div>
+        <div class="vp-row">
+          <span class="vp-time"><b>0:00</b> / 0:00</span><span class="vp-grow"></span>
+          <button data-vp="mute" aria-label="Mute">${vpIco.vol}</button>
+          <button data-vp="speed" class="vp-speed" aria-label="Playback speed">${vpRate}x</button>
+          <button data-vp="loop" class="${vpLoop ? "on" : ""}" aria-label="Loop" aria-pressed="${vpLoop}">${vpIco.loop}</button>
+          <button data-vp="fs" aria-label="Fullscreen">${vpIco.fs}</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  const el = $("pv"), vp = $("vp"), seek = vp.querySelector(".vp-seek"), buf = vp.querySelector(".vp-buf"), time = vp.querySelector(".vp-time");
+  el.loop = vpLoop; el.playbackRate = vpRate;
   const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
   el.addEventListener("error", () => {
-    if (queue[qi] !== v.id) return;
-    if (++tries < KEYS.length) { setSrc(); return; }
-    iframePlayer(v); toast("Playing with the Google Drive player");
+    if (queue[qi] !== v.id || !el.isConnected) return;
+    if (++tries < KEYS.length) { setSrc(); el.play().catch(() => {}); return; }
+    iframePlayer(v); toast("This video can't use the smooth player, so it's playing with the Google Drive player");
   });
+  const sync = () => {
+    vp.classList.toggle("paused", el.paused);
+    vp.querySelector(".vp-big").innerHTML = el.paused ? vpIco.play : vpIco.pause;
+  };
+  el.addEventListener("play", () => { sync(); vpAutoHide(); });
+  el.addEventListener("pause", () => { sync(); vpShowUI(true); });
+  el.addEventListener("waiting", () => vp.classList.add("loading"));
+  el.addEventListener("playing", () => vp.classList.remove("loading"));
+  el.addEventListener("canplay", () => vp.classList.remove("loading"));
+  el.addEventListener("timeupdate", () => {
+    if (!el.duration) return;
+    if (!seek.matches(":active")) seek.value = Math.round(el.currentTime / el.duration * 1000);
+    seek.style.setProperty("--p", (seek.value / 10) + "%");
+    time.innerHTML = `<b>${fmtSec(el.currentTime)}</b> / ${fmtSec(el.duration)}`;
+  });
+  el.addEventListener("progress", () => { try { if (el.duration && el.buffered.length) buf.style.width = (el.buffered.end(el.buffered.length - 1) / el.duration * 100) + "%"; } catch (e) {} });
+  el.addEventListener("ended", () => { if (!el.loop) step(1); });   // loop mati -> lanjut ke video berikutnya
+  seek.addEventListener("input", () => {
+    seek.style.setProperty("--p", (seek.value / 10) + "%");
+    if (el.duration) { el.currentTime = seek.value / 1000 * el.duration; time.innerHTML = `<b>${fmtSec(el.currentTime)}</b> / ${fmtSec(el.duration)}`; }
+    vpShowUI(true);
+  });
+  seek.addEventListener("change", () => vpAutoHide());
   setSrc();
-  el.play().catch(() => { el.muted = true; el.play().catch(() => {}); });
+  el.play().catch(() => { el.muted = true; vp.querySelector('[data-vp="mute"]').innerHTML = vpIco.mute; el.play().catch(() => {}); sync(); });
+}
+// tampilkan / sembunyikan tombol player (hilang sendiri setelah 3 detik saat video berjalan)
+function vpShowUI(stay) { const vp = $("vp"); if (!vp) return; vp.classList.add("ui-on"); clearTimeout(vpHideT); if (!stay) vpAutoHide(); }
+function vpAutoHide() { clearTimeout(vpHideT); vpHideT = setTimeout(() => { const vp = $("vp"), el = $("pv"); if (vp && el && !el.paused && !vp.querySelector(".vp-seek:active")) vp.classList.remove("ui-on"); }, 3000); }
+function vpFlash(side) { const f = $("vp")?.querySelector(".vp-flash." + side); if (!f) return; f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
+function vpFullscreen() {
+  const sc = $("screen"), on = document.fullscreenElement || sc.classList.contains("pseudo-fs");
+  const btn = sc.querySelector('[data-vp="fs"]');
+  if (on) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    sc.classList.remove("pseudo-fs"); try { screen.orientation?.unlock?.(); } catch (e) {}
+    if (btn) btn.innerHTML = vpIco.fs;
+    return;
+  }
+  const v = byId.get(queue[qi]);
+  const done = () => { if (btn) btn.innerHTML = vpIco.fsOff; if (v && !isTall(v)) screen.orientation?.lock?.("landscape").catch(() => {}); };
+  if (sc.requestFullscreen) sc.requestFullscreen().then(done).catch(() => { sc.classList.add("pseudo-fs"); done(); });
+  else { sc.classList.add("pseudo-fs"); done(); }
+}
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) { const b = $("screen")?.querySelector('[data-vp="fs"]'); if (b) b.innerHTML = vpIco.fs; } });
+// ketuk sekali = munculkan/sembunyikan tombol (TIDAK menjeda); ketuk dua kali di kiri/kanan = mundur/maju 10 detik
+{
+  let lastTap = 0, tapTimer;
+  $("screen").addEventListener("click", e => {
+    const vp = $("vp"), el = $("pv"); if (!vp || !el) return;
+    const b = e.target.closest("[data-vp]");
+    if (b) {
+      const a = b.dataset.vp;
+      if (a === "toggle") el.paused ? el.play().catch(() => {}) : el.pause();
+      if (a === "mute") { el.muted = !el.muted; b.innerHTML = el.muted ? vpIco.mute : vpIco.vol; }
+      if (a === "speed") { const r = [1, 1.25, 1.5, 2, 0.75]; vpRate = r[(r.indexOf(vpRate) + 1) % r.length]; el.playbackRate = vpRate; b.textContent = vpRate + "x"; }
+      if (a === "loop") { vpLoop = !vpLoop; el.loop = vpLoop; store("vg-loop", vpLoop); b.classList.toggle("on", vpLoop); b.setAttribute("aria-pressed", vpLoop); toast(vpLoop ? "Loop on" : "Loop off · plays the next video when this one ends"); }
+      if (a === "fs") vpFullscreen();
+      vpShowUI(); return;
+    }
+    if (e.target.closest(".vp-bottom")) { vpShowUI(); return; }
+    const r = vp.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, now = Date.now();
+    if (now - lastTap < 280) {
+      clearTimeout(tapTimer); lastTap = 0;
+      if (x < .38) { el.currentTime = Math.max(0, el.currentTime - 10); vpFlash("l"); }
+      else if (x > .62) { el.currentTime = Math.min(el.duration || 1e9, el.currentTime + 10); vpFlash("r"); }
+      else el.paused ? el.play().catch(() => {}) : el.pause();
+      return;
+    }
+    lastTap = now;
+    tapTimer = setTimeout(() => { vp.classList.contains("ui-on") && !el.paused ? (clearTimeout(vpHideT), vp.classList.remove("ui-on")) : vpShowUI(); }, 240);
+  });
 }
 function step(d) {
   if (queue.length < 2) return;
@@ -358,7 +461,11 @@ function renderUpNext() {
     <span class="up-txt"><b>${esc(v.name)}</b><small>${esc(v.cat)} · ${fmtDate(v.modified || v.created)}</small></span></button>`).join("");
   $("upList").scrollTop = 0;
 }
-const closePlayer = () => { $("modal").classList.remove("open"); document.body.classList.remove("in-player"); $("screen").innerHTML = ""; };
+const closePlayer = () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  $("screen").classList.remove("pseudo-fs");
+  $("modal").classList.remove("open"); document.body.classList.remove("in-player"); $("screen").innerHTML = "";
+};
 
 /* ---------- playlist buatan sendiri ---------- */
 let plVid = "";
@@ -460,7 +567,12 @@ function renderStats() {
     [library.length, "Videos"], [library.filter(v => isFav(v.id)).length, "Favorites"], [allPl().length, "Playlists"]
   ].map(([n, l]) => `<div><b>${n.toLocaleString("en-US")}</b><span>${l}</span></div>`).join("");
 }
+function renderPlayerSeg() {
+  const p = playerPref();
+  document.querySelectorAll("[data-player]").forEach(b => { b.classList.toggle("on", b.dataset.player === p); b.setAttribute("aria-pressed", b.dataset.player === p); });
+}
 function openProfile() {
+  renderPlayerSeg();
   renderSources(); $("srcMsg").textContent = "";
   renderStats();
   $("profData").value = ""; $("profMsg").textContent = "";
@@ -580,6 +692,7 @@ function shStop(i) {
   const m = shMediaEl(i); if (!m) return;
   m.querySelectorAll("video,iframe,.sh-unmute").forEach(el => { if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } el.remove(); });
   m.classList.remove("playing", "paused", "loading", "ready");
+  m.closest(".sh")?.classList.remove("ifr");
   const bar = m.closest(".sh")?.querySelector(".sh-bar i"); if (bar) bar.style.width = "0";
 }
 function shIframe(i) {
@@ -587,6 +700,7 @@ function shIframe(i) {
   shStop(i);
   m.insertAdjacentHTML("beforeend", `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`);
   m.classList.add("playing", "ready");
+  m.closest(".sh")?.classList.add("ifr");
 }
 // buat elemen video di slide i (kalau belum ada); autoplay = putar sekarang, kalau tidak: hanya dimuat duluan
 function shEnsureVideo(i, autoplay) {
@@ -718,6 +832,7 @@ document.addEventListener("click", e => {
   else if (act === "pl-delete") plDeleteFlow();
   else if (act === "backup") backup();
   else if (act === "open-profile") openProfile();
+  else if (t.dataset.player) { store("vg-player", t.dataset.player); renderPlayerSeg(); toast(t.dataset.player === "smooth" ? "Smooth player on" : "Google Drive player on (no API quota)"); }
   else if (t.dataset.delkey !== undefined) { KEYS.splice(+t.dataset.delkey, 1); saveSources(); renderSources(); toast("API key removed"); reloadLibrary(); }
   else if (t.dataset.delfolder) { FOLDERS = FOLDERS.filter(x => x !== t.dataset.delfolder); delete FOLDER_NAMES[t.dataset.delfolder]; saveSources(); renderSources(); toast("Folder removed"); reloadLibrary(); }
   else if (act === "sh-exit") setNav("home");
@@ -759,6 +874,11 @@ document.addEventListener("keydown", e => {
   if ($("modal").classList.contains("open") && !e.target.closest("input,textarea")) {
     if (e.key === "ArrowRight") step(1);
     if (e.key === "ArrowLeft") step(-1);
+    const pv = $("pv");
+    if (pv && (e.key === " " || e.key === "k")) { e.preventDefault(); pv.paused ? pv.play().catch(() => {}) : pv.pause(); }
+    if (pv && e.key === "j") { pv.currentTime -= 10; vpFlash("l"); }
+    if (pv && e.key === "l") { pv.currentTime += 10; vpFlash("r"); }
+    if (pv && e.key === "f") vpFullscreen();
   }
 });
 /* swipe kiri/kanan di player: kiri = berikutnya, kanan = sebelumnya */
@@ -768,7 +888,7 @@ document.addEventListener("keydown", e => {
   box.addEventListener("touchstart", e => {
     const t = e.touches[0], r = $("screen").getBoundingClientRect();
     // abaikan kalau mulai dari bar kontrol video (bawah layar video), supaya geser waktu tetap bisa
-    ok = e.touches.length === 1 && !(t.clientY > r.bottom - 56 && t.clientY < r.bottom);
+    ok = e.touches.length === 1 && !e.target.closest(".vp-bottom, input") && !(t.clientY > r.bottom - 56 && t.clientY < r.bottom && !$("vp"));
     sx = t.clientX; sy = t.clientY; st = Date.now();
   }, { passive: true });
   box.addEventListener("touchend", e => {

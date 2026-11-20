@@ -121,6 +121,11 @@
     <form class="src-form" id="folderForm"><input id="folderInput" type="text" placeholder="Folder link or ID" aria-label="Folder link or ID" autocomplete="off" spellcheck="false"><input id="folderName" type="text" maxlength="60" placeholder="Name (optional)" aria-label="Folder name"><button class="btn dark" type="submit">Add</button></form>
     <p class="msg" id="srcMsg" role="status"></p>
     <p class="muted small">Restrict your API key to this website in Google Cloud Console. Folders must be shared as “Anyone with the link”.</p>
+    <h3 class="sec">Video player</h3>
+    <div class="seg">
+      <button data-player="smooth" aria-pressed="false"><b>Smooth</b><small>Our own player: tap to show controls, double-tap to skip 10s. Uses a little API quota.</small></button>
+      <button data-player="drive" aria-pressed="false"><b>Google Drive</b><small>Google's built-in player. No API quota, but its look can't be changed.</small></button>
+    </div>
     <h3 class="sec">Overview</h3>
     <div class="stats" id="profStats"></div>
     <div id="profQuota"></div>
