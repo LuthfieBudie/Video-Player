@@ -652,7 +652,10 @@ const shIco = {
   mute: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>`,
   play: `<svg width="34" height="34" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`,
   heart: `<svg width="30" height="30" viewBox="0 0 24 24"><path d="M12 20.5s-8-4.9-8-11A4.5 4.5 0 0 1 12 6.6a4.5 4.5 0 0 1 8 2.9c0 6.1-8 11-8 11z"/></svg>`,
-  save: `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7M18 14v8M14 18h8"/></svg>`
+  save: `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7M18 14v8M14 18h8"/></svg>`,
+  vol: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`,
+  ctrl: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>`,
+  muted: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M17 9l5 6M22 9l-5 6"/></svg>`
 };
 
 function shSlide(v, i) {
@@ -672,11 +675,13 @@ function shSlide(v, i) {
         <b>${esc(v.name)}</b>
         <small>${fmtDate(v.modified || v.created)} · ${i + 1} of ${shList.length.toLocaleString("en-US")}</small>
       </div>
-      <div class="sh-bar"><i></i></div>
+      <div class="sh-bar" data-shbar="${i}" aria-label="Seek"><span><i></i></span></div>
     </div>
     <div class="sh-side">
       <button class="sh-act sh-like ${f ? "on" : ""}" data-fav="${esc(v.id)}" aria-label="Like" aria-pressed="${f}"><span class="ic">${shIco.heart}</span><small>Like</small></button>
       <button class="sh-act" data-add="${esc(v.id)}" aria-label="Save to playlist"><span class="ic">${shIco.save}</span><small>Save</small></button>
+      <button class="sh-act sh-ctrl" data-act="sh-ctrl" aria-label="Show Google Drive controls" aria-pressed="false"><span class="ic">${shIco.ctrl}</span><small>Controls</small></button>
+      <button class="sh-act sh-mute" data-act="sh-mute" aria-label="Sound on or off"><span class="ic">${shMuted ? shIco.muted : shIco.vol}</span><small>${shMuted ? "Muted" : "Sound"}</small></button>
       <button class="sh-act sh-nav" data-act="sh-up" aria-label="Previous video"><span class="ic">${shIco.up}</span></button>
       <button class="sh-act sh-nav" data-act="sh-down" aria-label="Next video"><span class="ic">${shIco.down}</span></button>
     </div>
@@ -695,7 +700,8 @@ const shIO = new IntersectionObserver(es => {
 function shMediaEl(i) { return $("shFeed").querySelector(`[data-shmedia="${i}"]`); }
 function shStop(i) {
   const m = shMediaEl(i); if (!m) return;
-  m.querySelectorAll("video,iframe,.sh-unmute").forEach(el => { if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } el.remove(); });
+  m.closest(".sh")?.classList.remove("shield");
+  m.querySelectorAll("video,iframe,.sh-unmute,.sh-shield").forEach(el => { if (el.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } el.remove(); });
   m.classList.remove("playing", "paused", "loading", "ready");
   m.closest(".sh")?.classList.remove("ifr");
   const bar = m.closest(".sh")?.querySelector(".sh-bar i"); if (bar) bar.style.width = "0";
@@ -703,9 +709,10 @@ function shStop(i) {
 function shIframe(i) {
   const m = shMediaEl(i), v = shList[i]; if (!m || !v) return;
   shStop(i);
-  m.insertAdjacentHTML("beforeend", `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`);
+  m.insertAdjacentHTML("beforeend", `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe><div class="sh-shield" aria-hidden="true"></div>`);
   m.classList.add("playing", "ready");
   m.closest(".sh")?.classList.add("ifr");
+  shSetShield(m.closest(".sh"), false);   // belum dilapisi: biar tombol play Google bisa ditekan dulu
 }
 // buat elemen video di slide i (kalau belum ada); autoplay = putar sekarang, kalau tidak: hanya dimuat duluan
 function shEnsureVideo(i, autoplay) {
@@ -718,6 +725,7 @@ function shEnsureVideo(i, autoplay) {
     el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", "");
     m.insertBefore(el, m.querySelector(".sh-spin"));
     const bar = m.closest(".sh").querySelector(".sh-bar i");
+    el.addEventListener("volumechange", shSyncMute);
     const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
     el.addEventListener("error", () => {
       if (!el.isConnected) return;
@@ -738,7 +746,7 @@ function shEnsureVideo(i, autoplay) {
     el.muted = shMuted;
     el.play().catch(() => {
       // browser menolak autoplay bersuara -> putar tanpa suara, tampilkan tombol suara
-      el.muted = true; shMuted = true;
+      el.muted = true; shMuted = true; shSyncMute();
       el.play().catch(() => {});
       if (!m.querySelector(".sh-unmute")) m.insertAdjacentHTML("beforeend", `<button class="sh-unmute" data-act="sh-unmute">${shIco.mute} Tap for sound</button>`);
     });
@@ -750,7 +758,8 @@ function shActivate(i) {
   shActive = i;
   if (i >= shRendered - 3) shRenderMore();
   // simpan hanya video sebelumnya, yang aktif, dan berikutnya (hemat memori & kuota)
-  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => { const k = +m.dataset.shmedia; if (k < i - 1 || k > i + 1) shStop(k); else if (k !== i) m.querySelector("video")?.pause(); });
+  // (player Google tidak bisa dijeda dari luar, jadi di mode Offline slide lain langsung dihentikan)
+  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => { const k = +m.dataset.shmedia; if (k < i - 1 || k > i + 1 || (shMode === "shortsOff" && k !== i)) shStop(k); else if (k !== i) m.querySelector("video")?.pause(); });
   if (shMode === "shortsOff" || !KEYS.length) { shStop(i); return; }
   const el = shEnsureVideo(i, true);
   // video berikutnya baru dimuat setelah video aktif siap diputar, supaya tidak berebut sinyal
@@ -767,6 +776,42 @@ function shStep(d) {
   const feed = $("shFeed"), i = Math.max(0, Math.min(shList.length - 1, shActive + d));
   const el = feed.querySelector(`.sh[data-i="${i}"]`);
   if (el) feed.scrollTo({ top: el.offsetTop, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+/* Shorts (Offline): lapisan transparan di atas player Google.
+   Saat aktif, sentuhan tidak sampai ke player Google -> tombolnya hilang sendiri, dan video bisa digeser seperti TikTok.
+   Tombol "Controls" mematikan lapisan supaya tombol Google bisa dipakai (jeda, mundur, dll). */
+let shShieldT;
+function shSetShield(sh, on) {
+  if (!sh) return;
+  sh.classList.toggle("shield", on);
+  const b = sh.querySelector(".sh-ctrl"); if (b) { b.classList.toggle("on", !on); b.setAttribute("aria-pressed", !on); }
+}
+// mengetuk ke dalam player Google membuat halaman kehilangan fokus -> pasang lapisan lagi beberapa detik kemudian
+addEventListener("blur", () => {
+  if (shMode !== "shortsOff") return;
+  setTimeout(() => {
+    const f = document.activeElement; if (!f || f.tagName !== "IFRAME") return;
+    const sh = f.closest(".sh"); if (!sh || sh.classList.contains("shield")) return;
+    clearTimeout(shShieldT);
+    shShieldT = setTimeout(() => { if (sh.classList.contains("ifr")) shSetShield(sh, true); }, 3500);
+  }, 0);
+});
+function shToggleCtrl() {
+  const sh = $("shFeed").querySelector(`.sh[data-i="${shActive}"]`); if (!sh || !sh.classList.contains("ifr")) return;
+  clearTimeout(shShieldT);
+  const showCtrl = sh.classList.contains("shield");
+  shSetShield(sh, !showCtrl);
+  if (showCtrl) toast("Google controls on: tap the video to pause or seek");
+}
+function shSyncMute() {
+  $("shFeed").querySelectorAll(".sh-mute").forEach(b => { b.querySelector(".ic").innerHTML = shMuted ? shIco.muted : shIco.vol; b.querySelector("small").textContent = shMuted ? "Muted" : "Sound"; });
+}
+function shToggleMute() {
+  shMuted = !shMuted;
+  $("shFeed").querySelectorAll("video").forEach(v => { v.muted = shMuted; });
+  shMediaEl(shActive)?.querySelector(".sh-unmute")?.remove();
+  const v = shMediaEl(shActive)?.querySelector("video"); if (v && !shMuted) v.play().catch(() => {});
+  shSyncMute();
 }
 function shTogglePause() {
   const m = shMediaEl(shActive), el = m?.querySelector("video"); if (!el) return;
@@ -801,12 +846,59 @@ function closeShorts() {
   $("shorts").hidden = true; document.body.classList.remove("in-shorts"); nativeBars("LIGHT");
   $("shFeed").innerHTML = "";
 }
+// bar progres bisa digeser (seperti contoh YM Gallery)
+{
+  let bar = null, vid = null;
+  const seekTo = e => {
+    if (!vid || !vid.duration) return;
+    const r = bar.getBoundingClientRect(), p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    vid.currentTime = p * vid.duration; bar.querySelector("i").style.width = p * 100 + "%";
+  };
+  $("shFeed").addEventListener("pointerdown", e => {
+    const b = e.target.closest(".sh-bar"); if (!b) return;
+    e.stopPropagation(); e.preventDefault();
+    vid = shMediaEl(+b.dataset.shbar)?.querySelector("video"); if (!vid) return;
+    bar = b; bar.classList.add("drag"); bar.setPointerCapture(e.pointerId); seekTo(e);
+  });
+  $("shFeed").addEventListener("pointermove", e => { if (bar) seekTo(e); });
+  const end = () => { bar?.classList.remove("drag"); bar = null; vid = null; };
+  $("shFeed").addEventListener("pointerup", end); $("shFeed").addEventListener("pointercancel", end);
+}
+// PC: tarik feed dengan mouse untuk pindah video (seperti contoh YM Gallery)
+{
+  const feed = $("shFeed");
+  let down = false, dragging = false, y0 = 0, top0 = 0, pid = null;
+  feed.addEventListener("dragstart", e => e.preventDefault());   // cegah gambar ikut "terseret"
+  feed.addEventListener("pointerdown", e => {
+    if (e.pointerType !== "mouse" || e.button !== 0 || e.target.closest("button, .sh-bar")) return;
+    down = true; dragging = false; y0 = e.clientY; top0 = feed.scrollTop; pid = e.pointerId;
+  });
+  feed.addEventListener("pointermove", e => {
+    if (!down) return;
+    const d = e.clientY - y0;
+    if (!dragging && Math.abs(d) > 6) { dragging = true; feed.classList.add("dragging"); feed.setPointerCapture(pid); }
+    if (dragging) feed.scrollTop = top0 - d;
+  });
+  const up = () => {
+    if (!down) return; down = false;
+    if (dragging) {
+      const h = feed.clientHeight || 1, d = feed.scrollTop - top0;   // hitung dulu sebelum snap aktif lagi
+      feed.classList.remove("dragging");
+      const i = Math.round(top0 / h) + (Math.abs(d) > h * 0.15 ? Math.sign(d) : 0);
+      feed.scrollTo({ top: Math.max(0, i) * h, behavior: "smooth" });
+      feed.dataset.dragged = "1"; setTimeout(() => { delete feed.dataset.dragged; }, 50);
+    }
+    dragging = false;
+  };
+  feed.addEventListener("pointerup", up); feed.addEventListener("pointercancel", up);
+}
 // ketuk sekali = jeda/putar, ketuk dua kali = like (seperti TikTok)
 {
   let tapT = 0, tapTimer;
   $("shFeed").addEventListener("click", e => {
-    if (e.target.closest("button")) return;
-    const m = e.target.closest(".sh-media"); if (!m || +m.dataset.shmedia !== shActive) return;
+    if (e.target.closest("button, .sh-bar") || $("shFeed").dataset.dragged) return;
+    if (e.target.closest(".sh-shield")) { if (!load("vg-shield-tip", false)) { toast("Tap Controls on the right to pause or seek"); store("vg-shield-tip", true); } return; }
+    const m = e.target.closest(".sh-frame")?.querySelector(".sh-media"); if (!m || +m.dataset.shmedia !== shActive) return;
     const now = Date.now();
     if (now - tapT < 300) { clearTimeout(tapTimer); tapT = 0; shLikeBurst(); return; }
     tapT = now;
@@ -852,6 +944,8 @@ document.addEventListener("click", e => {
   else if (act === "sh-exit") setNav("home");
   else if (act === "sh-up") shStep(-1);
   else if (act === "sh-down") shStep(1);
+  else if (act === "sh-mute") shToggleMute();
+  else if (act === "sh-ctrl") shToggleCtrl();
   else if (act === "sh-unmute") { shMuted = false; const v = shMediaEl(shActive)?.querySelector("video"); if (v) { v.muted = false; v.play().catch(() => {}); } t.remove(); }
   else if (t.dataset.shplay) shPlay(+t.dataset.shplay);
   else if (act === "restore") restore();
@@ -883,6 +977,7 @@ document.addEventListener("keydown", e => {
     if (e.key === "ArrowDown" || e.key === "PageDown") { e.preventDefault(); shStep(1); }
     if (e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); shStep(-1); }
     if (e.key === " " && shMode === "shorts") { e.preventDefault(); shTogglePause(); }
+    if (e.key === "m" && shMode === "shorts") shToggleMute();
     return;
   }
   if ($("modal").classList.contains("open") && !e.target.closest("input,textarea")) {
