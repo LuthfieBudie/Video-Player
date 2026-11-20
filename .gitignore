@@ -1,12 +1,21 @@
-# rahasia login Google, JANGAN di-upload ke GitHub
+# ===== File pribadi: JANGAN di-upload ke GitHub =====
+# cadangan berisi API key (semua variasi nama)
+*backup*
+*backrup*
+*Backup*
+*BACKUP*
+my-sources-backup.txt
+*.keystore
+*KEYSTORE*
+# daftar video pribadi (tidak dipakai website lagi)
+videos.json
+# login Google untuk script Python lama
 tools/credentials.json
 tools/token_*.json
 __pycache__/
+.venv/
 
-# cadangan pribadi berisi API key
-my-sources-backup.txt
-
-# hasil build aplikasi Android
+# ===== Hasil build aplikasi Android =====
 node_modules/
 www/
 android/

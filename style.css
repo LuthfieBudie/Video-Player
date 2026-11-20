@@ -88,6 +88,10 @@ main{padding:0 16px calc(112px + var(--sab));max-width:1240px;width:100%;margin:
 .row{display:flex;align-items:center;gap:8px;margin:auto 6px 0;font-size:13px;color:var(--mute);flex-wrap:wrap}
 .row .views{white-space:nowrap}
 .row .tag{background:var(--a,var(--butter));color:var(--dark);border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.card{cursor:pointer}
+.watched{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.18);pointer-events:none}
+.watched i{display:block;height:100%;width:0;background:var(--pink)}
+.watched:has(i[style="width:0%"]){display:none}
 .card.sk{pointer-events:none}
 .card.sk .thumb{animation:pulse 1.1s ease-in-out infinite}
 .card.sk i{display:block;height:12px;border-radius:6px;background:var(--panel2);margin:14px 6px 0;width:80%;animation:pulse 1.1s ease-in-out infinite}
@@ -243,6 +247,9 @@ body.in-player{overflow:hidden}
 .setup .acts{justify-content:flex-start}
 .setup p{color:var(--mute);font-size:13px;margin:14px 0 0}
 .acts.center{justify-content:center;margin-top:16px}
+.bk-row{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:14px;cursor:pointer}
+.bk-row input{width:20px;height:20px;accent-color:#cfdcc8;flex:none}
+.bk-row small{color:var(--mute)}
 .toast{position:fixed;left:50%;bottom:calc(104px + var(--sab));transform:translate(-50%,20px);background:var(--grad);color:var(--dark);font-weight:600;font-size:14px;padding:12px 18px;border-radius:20px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:calc(100% - 32px);text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
@@ -295,7 +302,8 @@ body.in-player{overflow:hidden}
 .sh-shield{position:absolute;inset:0;z-index:3;display:none;touch-action:pan-y}
 .sh.ifr.shield .sh-shield{display:block}
 .sh-ctrl{display:none}
-.shorts[data-mode=shortsOff] .sh.ifr .sh-ctrl{display:flex}
+.sh.ifr .sh-ctrl{display:flex}
+.sh.ifr .sh-mute,.sh.ifr .sh-bar{display:none}
 .sh-ctrl.on .ic{background:var(--grad);color:var(--dark)}
 .chips-s{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
 .chips-s button{height:40px;padding:0 14px;border-radius:999px;background:var(--panel2);font-size:13px;font-weight:600;color:var(--ink);border:1.5px solid transparent}

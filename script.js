@@ -99,6 +99,7 @@ const toVideo = (f, category) => {
     modified: f.modifiedTime || f.createdTime || "",
     dur: m.durationMillis ? +m.durationMillis : 0,
     w: m.width ? +m.width : 0, h: m.height ? +m.height : 0,   // ukuran video: untuk tahu vertikal / horizontal
+    mime: (sc ? f.shortcutDetails.targetMimeType : f.mimeType) || "",
     thumb: f.thumbnailLink || ""                               // thumbnail asli dari Drive (lebih cepat & akurat)
   };
 };
@@ -143,7 +144,7 @@ async function loadDrive() {
 }
 
 /* ---------- cache (khusus mode API) ---------- */
-const ckey = () => "vg-cache2-" + FOLDERS.map(id => id + ":" + (FOLDER_NAMES[id] || "")).join(",");
+const ckey = () => "vg-cache3-" + FOLDERS.map(id => id + ":" + (FOLDER_NAMES[id] || "")).join(",");
 const readCache = () => { const c = load(ckey(), null); return c && Date.now() - c.t < (CFG.CACHE_MINUTES || 10) * 60000 ? c.d : null; };
 const writeCache = d => { for (const k of Object.keys(localStorage)) if (k.startsWith("vg-cache")) localStorage.removeItem(k); store(ckey(), { t: Date.now(), d }); };
 
@@ -177,7 +178,7 @@ const card = (v, i) => {
   return `<article class="card" style="--a:${COLORS[i % COLORS.length]}">
   <button class="add" data-add="${esc(v.id)}" aria-label="Save to playlist">${addIco}</button>
   <button class="fav ${f ? "on" : ""}" data-fav="${esc(v.id)}" aria-label="Favorite" aria-pressed="${f}">${heart}</button>
-  <button class="thumb" data-play="${esc(v.id)}" aria-label="Play ${esc(v.name)}">${fallbackArt}${img(v, 480, i < 4)}${v.dur ? `<span class="dur">${fmtDur(v.dur)}</span>` : ""}<span class="play">${playIco("#16161a")}</span></button>
+  <button class="thumb" data-play="${esc(v.id)}" aria-label="Play ${esc(v.name)}">${fallbackArt}${img(v, 480, i < 4)}${v.dur ? `<span class="dur">${fmtDur(v.dur)}</span>` : ""}<span class="play">${playIco("#16161a")}</span><span class="watched"><i style="width:${watchedPct(v)}%"></i></span></button>
   <h3 title="${esc(v.name)}">${esc(v.name)}</h3><div class="cat"><i></i>${esc(v.cat)}</div>
   <div class="row"><span class="views">${fmtDate(v.modified || v.created)}</span>${driveFav.has(v.id) && !hiddenFav.has(v.id) ? '<span class="tag">Starred</span>' : ""}</div>
 </article>`;
@@ -327,10 +328,52 @@ const vpIco = {
   fsOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>`
 };
 const fmtSec = t => { t = Math.max(0, t | 0); const h = t / 3600 | 0, m = (t % 3600) / 60 | 0, s2 = String(t % 60).padStart(2, "0"); return h ? `${h}:${String(m).padStart(2, "0")}:${s2}` : `${m}:${s2}`; };
-let vpLoop = load("vg-loop", true), vpRate = 1, vpHideT;
+let vpLoop = load("vg-loop", true), vpRate = load("vg-rate", 1), vpHideT;
+
+/* Lanjutkan dari posisi terakhir (seperti YouTube) */
+let posMap = load("vg-pos", {});
+let posSaveT = 0;
+function savePos(id, t, dur) {
+  if (!dur || dur < 30) return;                         // video pendek tidak perlu dilanjutkan
+  if (t < 5 || t > dur - 8) delete posMap[id]; else { delete posMap[id]; posMap[id] = Math.floor(t); }
+  const keys = Object.keys(posMap); if (keys.length > 300) delete posMap[keys[0]];
+  if (Date.now() - posSaveT > 2500) { posSaveT = Date.now(); store("vg-pos", posMap); }
+}
+const watchedPct = v => posMap[v.id] && v.dur ? Math.min(100, posMap[v.id] * 1000 / v.dur * 100) : 0;
+
+/* Video berikutnya di antrean dimuat duluan, jadi tombol Next / geser langsung jalan */
+let pre = null;
+function dropPre() { if (pre) { pre.el.removeAttribute("src"); pre.el.load(); pre = null; } }
+function preloadNext() {
+  if (!useSmooth() || queue.length < 2) return;
+  const nid = queue[(qi + 1) % queue.length], v = byId.get(nid);
+  if (!v || !smoothOK(v) || pre?.id === nid) return;
+  dropPre();
+  const el = document.createElement("video");
+  el.preload = "auto"; el.muted = true; el.playsInline = true;
+  const k = KEYS[keyTurn++ % KEYS.length]; trackPlay(k);
+  el.src = `${API}/${encodeURIComponent(nid)}?alt=media&key=${encodeURIComponent(k)}`;
+  el.addEventListener("error", () => { if (pre?.el === el) pre = null; });
+  pre = { id: nid, el };
+}
+
+/* Video yang tidak bisa diputar player Smooth langsung dialihkan ke player Drive, lalu DIINGAT
+   supaya lain kali tidak menunggu lagi. Format lama (AVI, WMV, FLV, MPEG-2) langsung dilewati. */
+const NO_SMOOTH_MIME = /avi|msvideo|wmv|ms-asf|x-flv|mpeg$|mp2t/i;
+let noSmooth = new Set(load("vg-nosmooth", []));
+const smoothOK = v => !!v && !noSmooth.has(v.id) && !(v.mime && NO_SMOOTH_MIME.test(v.mime));
+function markNoSmooth(id) { noSmooth.add(id); store("vg-nosmooth", [...noSmooth].slice(-3000)); }
+// cek cepat (2 byte) kenapa video gagal: "codec" = file bisa diunduh tapi formatnya tidak didukung browser,
+// "key" = API key ditolak / kena limit -> coba key lain
+async function smoothFail(v, key) {
+  try {
+    const r = await fetch(`${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(key)}`, { headers: { Range: "bytes=0-1" } });
+    return r.ok ? "codec" : "key";
+  } catch (e) { return "key"; }
+}
 
 function videoPlayer(v, dir) {
-  if (!useSmooth()) { iframePlayer(v); return; }
+  if (!useSmooth() || !smoothOK(v)) { iframePlayer(v); return; }
   let tries = 0;
   const start = keyTurn++;
   $("screen").innerHTML = `<div class="vp ui-on loading ${dir ? "in-" + dir : ""}" id="vp">
@@ -351,13 +394,30 @@ function videoPlayer(v, dir) {
       </div>
     </div>
   </div>`;
-  const el = $("pv"), vp = $("vp"), seek = vp.querySelector(".vp-seek"), buf = vp.querySelector(".vp-buf"), time = vp.querySelector(".vp-time");
+  let el = $("pv"); const vp = $("vp"), seek = vp.querySelector(".vp-seek"), buf = vp.querySelector(".vp-buf"), time = vp.querySelector(".vp-time");
+  let reused = false;
+  if (pre && pre.id === v.id) {           // pakai video yang sudah dimuat duluan -> langsung jalan
+    const e2 = pre.el; pre = null;
+    e2.id = "pv"; e2.setAttribute("playsinline", ""); e2.setAttribute("webkit-playsinline", ""); e2.poster = thumbUrl(v, 1280); e2.muted = false;
+    el.replaceWith(e2); el = e2; reused = true;
+    if (el.readyState >= 3) vp.classList.remove("loading");
+  }
   el.loop = vpLoop; el.playbackRate = vpRate;
+  el.addEventListener("loadedmetadata", () => {
+    const p = posMap[v.id];
+    if (p && el.duration && p < el.duration - 8) { el.currentTime = p; toast(`Resumed at ${fmtSec(p)}`); }
+  }, { once: true });
+  if (reused && el.readyState >= 1) { const p = posMap[v.id]; if (p && el.duration && p < el.duration - 8) el.currentTime = p; }
+  el.addEventListener("canplay", () => setTimeout(() => { if (queue[qi] === v.id) preloadNext(); }, 800), { once: true });
   const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
-  el.addEventListener("error", () => {
+  el.addEventListener("error", async () => {
     if (queue[qi] !== v.id || !el.isConnected) return;
-    if (++tries < KEYS.length) { setSrc(); el.play().catch(() => {}); return; }
-    iframePlayer(v); toast("This video can't use the smooth player, so it's playing with the Google Drive player");
+    const why = await smoothFail(v, KEYS[(start + tries) % KEYS.length]);
+    if (queue[qi] !== v.id || !el.isConnected) return;
+    if (why === "key" && ++tries < KEYS.length) { setSrc(); el.play().catch(() => {}); return; }
+    if (why === "codec") markNoSmooth(v.id);
+    iframePlayer(v);
+    toast(why === "codec" ? "This video's format isn't supported here, so it plays with the Google Drive player (remembered)" : "API key limit reached, playing with the Google Drive player");
   });
   const sync = () => {
     vp.classList.toggle("paused", el.paused);
@@ -373,17 +433,19 @@ function videoPlayer(v, dir) {
     if (!seek.matches(":active")) seek.value = Math.round(el.currentTime / el.duration * 1000);
     seek.style.setProperty("--p", (seek.value / 10) + "%");
     time.innerHTML = `<b>${fmtSec(el.currentTime)}</b> / ${fmtSec(el.duration)}`;
+    savePos(v.id, el.currentTime, el.duration);
   });
   el.addEventListener("progress", () => { try { if (el.duration && el.buffered.length) buf.style.width = (el.buffered.end(el.buffered.length - 1) / el.duration * 100) + "%"; } catch (e) {} });
-  el.addEventListener("ended", () => { if (!el.loop) step(1); });   // loop mati -> lanjut ke video berikutnya
+  el.addEventListener("ended", () => { delete posMap[v.id]; store("vg-pos", posMap); if (!el.loop) step(1); });   // loop mati -> lanjut ke video berikutnya
   seek.addEventListener("input", () => {
     seek.style.setProperty("--p", (seek.value / 10) + "%");
     if (el.duration) { el.currentTime = seek.value / 1000 * el.duration; time.innerHTML = `<b>${fmtSec(el.currentTime)}</b> / ${fmtSec(el.duration)}`; }
     vpShowUI(true);
   });
   seek.addEventListener("change", () => vpAutoHide());
-  setSrc();
+  if (!reused) setSrc();
   el.play().catch(() => { el.muted = true; vp.querySelector('[data-vp="mute"]').innerHTML = vpIco.mute; el.play().catch(() => {}); sync(); });
+  sync();
 }
 // tampilkan / sembunyikan tombol player (hilang sendiri setelah 3 detik saat video berjalan)
 function vpShowUI(stay) { const vp = $("vp"); if (!vp) return; vp.classList.add("ui-on"); clearTimeout(vpHideT); if (!stay) vpAutoHide(); }
@@ -414,7 +476,7 @@ document.addEventListener("fullscreenchange", () => { if (!document.fullscreenEl
       const a = b.dataset.vp;
       if (a === "toggle") el.paused ? el.play().catch(() => {}) : el.pause();
       if (a === "mute") { el.muted = !el.muted; b.innerHTML = el.muted ? vpIco.mute : vpIco.vol; }
-      if (a === "speed") { const r = [1, 1.25, 1.5, 2, 0.75]; vpRate = r[(r.indexOf(vpRate) + 1) % r.length]; el.playbackRate = vpRate; b.textContent = vpRate + "x"; }
+      if (a === "speed") { const r = [1, 1.25, 1.5, 2, 0.75]; vpRate = r[(r.indexOf(vpRate) + 1) % r.length]; el.playbackRate = vpRate; store("vg-rate", vpRate); b.textContent = vpRate + "x"; }
       if (a === "loop") { vpLoop = !vpLoop; el.loop = vpLoop; store("vg-loop", vpLoop); b.classList.toggle("on", vpLoop); b.setAttribute("aria-pressed", vpLoop); toast(vpLoop ? "Loop on" : "Loop off · plays the next video when this one ends"); }
       if (a === "fs") vpFullscreen();
       vpShowUI(); return;
@@ -462,6 +524,9 @@ function renderUpNext() {
   $("upList").scrollTop = 0;
 }
 const closePlayer = () => {
+  const pv = $("pv"); if (pv && pv.duration) { savePos(queue[qi], pv.currentTime, pv.duration); store("vg-pos", posMap); }
+  dropPre();
+  if (!loading && mode !== "playlists") document.querySelectorAll(".card").forEach(c => { const id = c.querySelector("[data-play]")?.dataset.play, v = byId.get(id), w = c.querySelector(".watched i"); if (v && w) w.style.width = watchedPct(v) + "%"; });
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   $("screen").classList.remove("pseudo-fs");
   $("modal").classList.remove("open"); document.body.classList.remove("in-player"); $("screen").innerHTML = "";
@@ -612,25 +677,40 @@ function renderQuota() {
     <div class="kchips">${keys}</div>
     <p class="muted small">Only Shorts (and direct play, if enabled) use API quota. Home and Shorts (Offline) use none. For exact totals across all visitors, see <a href="https://console.cloud.google.com/apis/api/drive.googleapis.com/quotas" target="_blank" rel="noopener">Drive API quotas in Google Cloud Console</a>.</p>`;
 }
+// Cadangan lengkap: folder, favorit, playlist, pengaturan, posisi tonton. API key hanya kalau dicentang.
 async function backup() {
-  // API key sengaja TIDAK ikut dicadangkan (lebih aman); masukkan ulang key di perangkat baru
-  const data = JSON.stringify({ folders: FOLDERS.map(id => ({ id, name: FOLDER_NAMES[id] || "" })), favs: [...localFav], hidden: [...hiddenFav], playlists: userPl });
+  const withKeys = $("bkKeys")?.checked;
+  const data = JSON.stringify({
+    v: 2, folders: FOLDERS.map(id => ({ id, name: FOLDER_NAMES[id] || "" })),
+    favs: [...localFav], hidden: [...hiddenFav], playlists: userPl,
+    settings: { player: load("vg-player", null), shmax: load("vg-shmax", 0), loop: load("vg-loop", true), rate: load("vg-rate", 1) },
+    pos: posMap, ...(withKeys ? { keys: KEYS } : {})
+  });
   $("profData").value = data;
-  try { await navigator.clipboard.writeText(data); $("profMsg").textContent = "Backup copied (API keys are not included, for safety). Paste it in another browser, then tap Restore."; }
-  catch (e) { $("profData").select(); $("profMsg").textContent = "Copy the text in the box above manually (Ctrl + C)."; }
+  try { await navigator.clipboard.writeText(data); $("profMsg").textContent = `Backup copied${withKeys ? " (includes API keys, keep it private)" : ""}. Save it somewhere (e.g. WhatsApp to yourself, Notes), then paste it here and tap Restore.`; }
+  catch (e) { $("profData").select(); $("profMsg").textContent = "Copy the text in the box above manually (select all, then copy)."; }
 }
 function restore() {
   try {
-    const d = JSON.parse($("profData").value);
+    const d = JSON.parse($("profData").value.trim());
     if (!d || !Array.isArray(d.playlists)) throw 0;
     localFav = new Set(d.favs || []); hiddenFav = new Set(d.hidden || []);
     userPl = d.playlists.filter(p => p && p.id && p.name && Array.isArray(p.ids)).map(p => ({ ...p, user: true }));
     saveFav(); savePl();
     if (Array.isArray(d.folders)) {
       const list = d.folders.map(x => ({ id: toId(x.id ?? x), name: String(x.name || "") })).filter(x => x.id);
-      FOLDERS = [...new Set(list.map(x => x.id))]; FOLDER_NAMES = Object.fromEntries(list.map(x => [x.id, x.name])); saveSources();
+      FOLDERS = [...new Set(list.map(x => x.id))]; FOLDER_NAMES = Object.fromEntries(list.map(x => [x.id, x.name]));
     }
-    openProfile(); reloadLibrary(); $("profMsg").textContent = "Data restored. Add your API key again if this is a new browser.";
+    if (Array.isArray(d.keys) && d.keys.length) KEYS = [...new Set([...KEYS, ...d.keys.map(k => String(k).trim()).filter(Boolean)])];
+    saveSources();
+    const st = d.settings || {};
+    if (st.player) store("vg-player", st.player);
+    if (st.shmax !== undefined) store("vg-shmax", st.shmax);
+    if (st.loop !== undefined) { store("vg-loop", st.loop); vpLoop = st.loop; }
+    if (st.rate) { store("vg-rate", st.rate); vpRate = st.rate; }
+    if (d.pos && typeof d.pos === "object") { posMap = { ...d.pos, ...posMap }; store("vg-pos", posMap); }
+    openProfile(); reloadLibrary();
+    $("profMsg").textContent = KEYS.length ? "Everything restored." : "Restored. Add your API key above to load the videos.";
   } catch (e) { $("profMsg").textContent = "That backup text isn't valid."; }
 }
 
@@ -717,6 +797,7 @@ function shIframe(i) {
 // buat elemen video di slide i (kalau belum ada); autoplay = putar sekarang, kalau tidak: hanya dimuat duluan
 function shEnsureVideo(i, autoplay) {
   const m = shMediaEl(i), v = shList[i]; if (!m || !v) return null;
+  if (!smoothOK(v)) { if (autoplay) shIframe(i); return null; }   // sudah diketahui tidak cocok -> langsung player Drive
   let el = m.querySelector("video");
   if (!el) {
     let tries = 0; const start = keyTurn++;
@@ -727,11 +808,14 @@ function shEnsureVideo(i, autoplay) {
     const bar = m.closest(".sh").querySelector(".sh-bar i");
     el.addEventListener("volumechange", shSyncMute);
     const setSrc = () => { const k = KEYS[(start + tries) % KEYS.length]; trackPlay(k); el.src = `${API}/${encodeURIComponent(v.id)}?alt=media&key=${encodeURIComponent(k)}`; };
-    el.addEventListener("error", () => {
+    el.addEventListener("error", async () => {
       if (!el.isConnected) return;
-      if (++tries < KEYS.length) { setSrc(); if (shActive === i) el.play().catch(() => {}); return; }
+      const why = await smoothFail(v, KEYS[(start + tries) % KEYS.length]);
+      if (!el.isConnected) return;
+      if (why === "key" && ++tries < KEYS.length) { setSrc(); if (shActive === i) el.play().catch(() => {}); return; }
       el.dataset.failed = 1;
-      if (shActive === i) { shIframe(i); toast("This video is playing with the Google Drive player"); }
+      if (why === "codec") markNoSmooth(v.id);
+      if (shActive === i) shIframe(i);
     });
     el.addEventListener("waiting", () => { if (shActive === i) m.classList.add("loading"); });
     el.addEventListener("playing", () => m.classList.remove("loading"), { passive: true });
@@ -788,7 +872,7 @@ function shSetShield(sh, on) {
 }
 // mengetuk ke dalam player Google membuat halaman kehilangan fokus -> pasang lapisan lagi beberapa detik kemudian
 addEventListener("blur", () => {
-  if (shMode !== "shortsOff") return;
+  if (!shMode) return;
   setTimeout(() => {
     const f = document.activeElement; if (!f || f.tagName !== "IFRAME") return;
     const sh = f.closest(".sh"); if (!sh || sh.classList.contains("shield")) return;
@@ -1004,8 +1088,16 @@ document.addEventListener("keydown", e => {
     if (!ok) return; ok = false;
     const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - st < 800) step(dx < 0 ? 1 : -1);
+    // geser ke bawah (di bagian atas layar) = tutup player
+    else if (dy > 110 && Math.abs(dy) > Math.abs(dx) * 1.5 && box.scrollTop <= 0 && sy < $("screen").getBoundingClientRect().bottom) closePlayer();
   }, { passive: true });
 }
+// seluruh kartu bisa diketuk untuk membuka video (bukan cuma gambarnya)
+$("grid").addEventListener("click", e => {
+  if (e.target.closest("button")) return;
+  const c = e.target.closest(".card"); const id = c?.querySelector("[data-play]")?.dataset.play;
+  if (id) openPlayer(id);
+});
 let qTimer;
 $("q").addEventListener("input", e => { clearTimeout(qTimer); qTimer = setTimeout(() => { q = e.target.value.trim().toLowerCase(); if (!loading) { if (mode === "playlists") mode = "home"; renderAll(); } }, 150); });
 

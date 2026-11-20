@@ -36,6 +36,16 @@ jobs:
       - name: Install Capacitor
         run: npm install
 
+      # simpan komponen Gradle/Android supaya build berikutnya tidak perlu mengunduh ulang dari Maven
+      # (mengurangi error "429 Too Many Requests")
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Siapkan file website (www/)
         run: node build-www.js
 
@@ -50,11 +60,38 @@ jobs:
       - name: Sinkron
         run: npx cap sync android
 
+      - name: Nomor versi otomatis
+        run: |
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
+      # Kunci tanda tangan yang SAMA setiap build -> APK baru bisa dipasang di atas versi lama
+      # tanpa uninstall, jadi playlist, favorit, API key & folder tidak hilang.
+      - name: Pakai kunci tanda tangan tetap
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            echo "Kunci tanda tangan tetap dipakai."
+          else
+            echo "::warning::Secret DEBUG_KEYSTORE_BASE64 belum diisi. APK memakai kunci acak, jadi update harus uninstall dulu dan data hilang."
+          fi
+
       - name: Build APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          # coba sampai 3x: kalau server Maven sedang sibuk (429), tunggu 1 menit lalu ulangi
+          ok=0
+          for i in 1 2 3; do
+            if ./gradlew assembleDebug --no-daemon; then ok=1; break; fi
+            echo "Build gagal (percobaan $i). Menunggu 60 detik lalu mencoba lagi..."
+            sleep 60
+          done
+          [ "$ok" = 1 ]
 
       - name: Ambil APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk VideoGallery.apk

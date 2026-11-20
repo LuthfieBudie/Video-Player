@@ -134,7 +134,8 @@
     <div class="stats" id="profStats"></div>
     <div id="profQuota"></div>
     <h3 class="sec">Backup</h3>
-    <p class="muted small">Favorites, playlists and folders are stored in this browser. Copy a backup to move them to another browser or phone. API keys are never included.</p>
+    <p class="muted small">Favorites, playlists, folders and settings are stored on this device. Copy a backup before reinstalling the app or moving to another phone.</p>
+    <label class="bk-row"><input type="checkbox" id="bkKeys"> <span>Include API keys <small>(keep the backup private)</small></span></label>
     <textarea id="profData" rows="4" aria-label="Backup data" placeholder="Paste a backup here to restore it"></textarea>
     <p class="msg" id="profMsg" role="status"></p>
     <div class="acts"><button class="btn" data-act="restore">Restore</button><button class="btn dark" data-act="backup">Copy backup</button></div>
