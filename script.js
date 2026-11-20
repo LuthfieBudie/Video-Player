@@ -567,7 +567,12 @@ function renderStats() {
     [library.length, "Videos"], [library.filter(v => isFav(v.id)).length, "Favorites"], [allPl().length, "Playlists"]
   ].map(([n, l]) => `<div><b>${n.toLocaleString("en-US")}</b><span>${l}</span></div>`).join("");
 }
+function renderShMax() {
+  const m = String(load("vg-shmax", 0));
+  document.querySelectorAll("[data-shmax]").forEach(b => { b.classList.toggle("on", b.dataset.shmax === m); b.setAttribute("aria-pressed", b.dataset.shmax === m); });
+}
 function renderPlayerSeg() {
+  renderShMax();
   const p = playerPref();
   document.querySelectorAll("[data-player]").forEach(b => { b.classList.toggle("on", b.dataset.player === p); b.setAttribute("aria-pressed", b.dataset.player === p); });
 }
@@ -639,7 +644,7 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add
    shorts    = player langsung (autoplay + loop, geser di mana saja) -> memakai kuota Drive API
    shortsOff = player Google Drive (tanpa kuota; ketuk untuk putar)
    Kecepatan: video berikutnya sudah dimuat duluan (preload), jadi saat digeser langsung jalan. */
-let shMode = "", shList = [], shRendered = 0, shActive = -1, shMuted = false;
+let shMode = "", shList = [], shRendered = 0, shActive = -1, shMuted = false, shPreT;
 const SH_BATCH = 6;
 const shIco = {
   up: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>`,
@@ -744,11 +749,15 @@ function shActivate(i) {
   if (i === shActive || !shList[i]) return;
   shActive = i;
   if (i >= shRendered - 3) shRenderMore();
-  // hentikan semua video selain yang aktif dan satu berikutnya (hemat memori & kuota)
-  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => { const k = +m.dataset.shmedia; if (k !== i && k !== i + 1) shStop(k); else if (k !== i) m.querySelector("video")?.pause(); });
+  // simpan hanya video sebelumnya, yang aktif, dan berikutnya (hemat memori & kuota)
+  $("shFeed").querySelectorAll("[data-shmedia]").forEach(m => { const k = +m.dataset.shmedia; if (k < i - 1 || k > i + 1) shStop(k); else if (k !== i) m.querySelector("video")?.pause(); });
   if (shMode === "shortsOff" || !KEYS.length) { shStop(i); return; }
-  shEnsureVideo(i, true);
-  shEnsureVideo(i + 1, false);   // preload video berikutnya supaya langsung jalan saat digeser
+  const el = shEnsureVideo(i, true);
+  // video berikutnya baru dimuat setelah video aktif siap diputar, supaya tidak berebut sinyal
+  clearTimeout(shPreT);
+  const preload = () => { if (shActive === i) shEnsureVideo(i + 1, false); };
+  if (!el || el.readyState >= 3) shPreT = setTimeout(preload, 300);
+  else { el.addEventListener("canplay", preload, { once: true }); shPreT = setTimeout(preload, 6000); }
 }
 function shPlay(i) {
   if (shMode === "shortsOff" || !KEYS.length) shIframe(i);
@@ -774,7 +783,11 @@ function openShorts(kind) {
   $("shBadge").textContent = kind === "shorts" ? "Uses API quota" : "No API quota";
   $("shorts").dataset.mode = kind;
   $("shorts").hidden = false; document.body.classList.add("in-shorts");
-  shList = shuffle([...library]); shRendered = 0; shActive = -1;
+  // Profile -> "Shorts length": hanya video pendek supaya cepat (durasi tidak diketahui tetap ikut)
+  const max = +load("vg-shmax", 0);
+  let pool = max ? library.filter(v => !v.dur || v.dur <= max) : library;
+  if (max && !pool.length) { pool = library; toast("No short videos found, showing all videos"); }
+  shList = shuffle([...pool]); shRendered = 0; shActive = -1;
   $("shFeed").innerHTML = ""; $("shFeed").scrollTop = 0;
   if (!shList.length) { $("shFeed").innerHTML = `<div class="sh-empty">No videos yet. Add an API key and a folder in Profile.</div>`; return; }
   shRenderMore();
@@ -832,6 +845,7 @@ document.addEventListener("click", e => {
   else if (act === "pl-delete") plDeleteFlow();
   else if (act === "backup") backup();
   else if (act === "open-profile") openProfile();
+  else if (t.dataset.shmax !== undefined) { store("vg-shmax", +t.dataset.shmax); renderShMax(); toast(+t.dataset.shmax ? `Shorts will show videos up to ${+t.dataset.shmax / 60000} min` : "Shorts will show all videos"); }
   else if (t.dataset.player) { store("vg-player", t.dataset.player); renderPlayerSeg(); toast(t.dataset.player === "smooth" ? "Smooth player on" : "Google Drive player on (no API quota)"); }
   else if (t.dataset.delkey !== undefined) { KEYS.splice(+t.dataset.delkey, 1); saveSources(); renderSources(); toast("API key removed"); reloadLibrary(); }
   else if (t.dataset.delfolder) { FOLDERS = FOLDERS.filter(x => x !== t.dataset.delfolder); delete FOLDER_NAMES[t.dataset.delfolder]; saveSources(); renderSources(); toast("Folder removed"); reloadLibrary(); }

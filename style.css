@@ -289,6 +289,12 @@ body.in-player{overflow:hidden}
 /* Shorts (Offline): saat player Drive tampil, teks & tombol menyingkir supaya kontrol Drive tidak tertutup */
 .sh.ifr .sh-meta,.sh.ifr .sh-shade,.sh.ifr .sh-bar{opacity:0;pointer-events:none;transition:opacity .2s}
 .sh.ifr .sh-side{bottom:auto;top:calc(76px + var(--sat));gap:10px}
+/* player Drive dipasang di antara header dan menu bawah, supaya semua tombolnya terlihat */
+.sh.ifr .sh-media{top:calc(64px + var(--sat));bottom:calc(92px + var(--sab))}
+.sh.ifr .sh-bg,.sh.ifr .sh-poster{display:none}
+.chips-s{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+.chips-s button{height:40px;padding:0 14px;border-radius:999px;background:var(--panel2);font-size:13px;font-weight:600;color:var(--ink);border:1.5px solid transparent}
+.chips-s button.on{border-color:var(--butter);background:#2c2c24}
 .sh.ifr .sh-act small{display:none}
 .sh.ifr .sh-act .ic{width:44px;height:44px}
 
@@ -388,5 +394,6 @@ body.in-shorts{overflow:hidden}
   .sh-act small{text-shadow:none;color:var(--mute)}
   .sh-like.on .ic{background:var(--pink)}
   .sh-unmute{top:80px}
+  .sh.ifr .sh-media{top:0;bottom:0}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
