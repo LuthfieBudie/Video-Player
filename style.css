@@ -425,3 +425,6 @@ body.in-shorts{overflow:hidden}
 @media(max-width:959px){
   .sh-media iframe,.screen iframe{width:200%;height:200%;transform:scale(.5);transform-origin:0 0}
 }
+/* Player Drive di Home: lapisan transparan supaya tombol Google hilang saat menonton */
+.screen .ifr-shield{position:absolute;inset:0;z-index:3;display:none;cursor:pointer}
+.screen.ifr.shield .ifr-shield{display:block}
