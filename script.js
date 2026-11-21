@@ -312,26 +312,37 @@ function openPlayer(id, list) {
 }
 let keyTurn = Math.random() * 97 | 0;
 function iframePlayer(v) {
-  $("screen").innerHTML = `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe><div class="ifr-shield" aria-hidden="true"></div>`;
-  $("screen").classList.add("ifr");   // lapisan belum aktif: tombol play Google bisa ditekan dulu
+  const sc = $("screen");
+  sc.innerHTML = `<iframe src="https://drive.google.com/file/d/${encodeURIComponent(v.id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe><div class="ifr-shield" aria-hidden="true"></div>`;
+  sc.classList.add("ifr");   // lapisan belum aktif: tombol play Google bisa ditekan dulu
+  ifrArmed = false;
+  $("pHide").hidden = sc.classList.contains("tall"); ifrSetShield(false);
 }
-/* Player Drive di Home: tombol Google tidak bisa disembunyikan lewat kode.
-   Jadi beberapa detik setelah video disentuh, dipasang lapisan transparan di atasnya ->
-   sentuhan tidak sampai ke player Google, tombolnya hilang sendiri, video bersih.
-   Ketuk video sekali = tombol Google aktif lagi. */
-let ifrShieldT;
+/* Player Drive di Home (video horizontal): tombol Google tidak bisa disembunyikan lewat kode.
+   Jadi setelah video disentuh, dipasang lapisan transparan di atasnya -> sentuhan tidak sampai
+   ke player Google, tombolnya hilang sendiri. Tombol "Show/Hide controls" di atas video untuk mengatur manual. */
+let ifrShieldT, ifrArmed = false;
 function ifrSetShield(on) {
-  const sc = $("screen"); clearTimeout(ifrShieldT);
-  sc.classList.toggle("shield", on && sc.classList.contains("ifr") && !sc.classList.contains("tall"));   // video vertikal tidak perlu
+  const sc = $("screen"); clearTimeout(ifrShieldT); ifrArmed = false;
+  on = on && sc.classList.contains("ifr") && !sc.classList.contains("tall");   // video vertikal tidak perlu
+  sc.classList.toggle("shield", on);
+  $("pHide").textContent = on ? "Show controls" : "Hide controls";
+  $("pHide").classList.toggle("on", on);
 }
-addEventListener("blur", () => {
-  if (!$("modal").classList.contains("open")) return;
-  setTimeout(() => {
-    const f = document.activeElement; if (!f || f.tagName !== "IFRAME" || !$("screen").contains(f)) return;
-    clearTimeout(ifrShieldT);
+function ifrUnshield() {
+  ifrSetShield(false);
+  document.activeElement?.blur?.(); window.focus();   // supaya sentuhan berikutnya ke player Google terdeteksi lagi
+}
+// cek berkala: kalau player Google sedang disentuh (fokus pindah ke iframe), sembunyikan tombolnya 1,5 detik kemudian
+setInterval(() => {
+  const sc = $("screen");
+  if (ifrArmed || !$("modal").classList.contains("open") || !sc.classList.contains("ifr") || sc.classList.contains("shield") || sc.classList.contains("tall")) return;
+  const a = document.activeElement;
+  if ((a && a.tagName === "IFRAME" && sc.contains(a)) || !document.hasFocus()) {
+    ifrArmed = true;
     ifrShieldT = setTimeout(() => ifrSetShield(true), 1500);
-  }, 0);
-});
+  }
+}, 300);
 // Pilihan player (Profile): "smooth" = player buatan sendiri (memakai sedikit kuota API),
 // "drive" = player Google Drive (tanpa kuota, tapi tampilannya tidak bisa diatur)
 const playerPref = () => load("vg-player", CFG.DIRECT_PLAY === false ? "drive" : "smooth");
@@ -487,10 +498,10 @@ document.addEventListener("fullscreenchange", () => { if (!document.fullscreenEl
 // ketuk sekali = munculkan/sembunyikan tombol (TIDAK menjeda); ketuk dua kali di kiri/kanan = mundur/maju 10 detik
 {
   let lastTap = 0, tapTimer;
+  $("pHide").addEventListener("click", () => $("screen").classList.contains("shield") ? ifrUnshield() : ifrSetShield(true));
   $("screen").addEventListener("click", e => {
     if (e.target.closest(".ifr-shield")) {
-      ifrSetShield(false);
-      document.activeElement?.blur?.(); window.focus();   // supaya sentuhan berikutnya ke player Google terdeteksi lagi
+      ifrUnshield();
       if (!load("vg-ifr-tip", false)) { toast("Controls on · tap the video again to use them"); store("vg-ifr-tip", true); }
       return;
     }
@@ -535,7 +546,7 @@ function showPlayer(dir) {
   $("pAdd").dataset.id = v.id;
   $("pFav").dataset.fav = v.id; const on = isFav(v.id); $("pFav").classList.toggle("on", on); $("pFav").setAttribute("aria-pressed", on);
   $("pPrev").disabled = $("pNext").disabled = queue.length < 2;
-  $("screen").classList.remove("ifr", "shield"); clearTimeout(ifrShieldT);
+  $("screen").classList.remove("ifr", "shield"); clearTimeout(ifrShieldT); $("pHide").hidden = true;
   videoPlayer(v, dir);
   renderUpNext();
 }
@@ -553,7 +564,7 @@ const closePlayer = () => {
   dropPre();
   if (!loading && mode !== "playlists") document.querySelectorAll(".card").forEach(c => { const id = c.querySelector("[data-play]")?.dataset.play, v = byId.get(id), w = c.querySelector(".watched i"); if (v && w) w.style.width = watchedPct(v) + "%"; });
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  $("screen").classList.remove("pseudo-fs", "ifr", "shield"); clearTimeout(ifrShieldT);
+  $("screen").classList.remove("pseudo-fs", "ifr", "shield"); clearTimeout(ifrShieldT); $("pHide").hidden = true;
   $("modal").classList.remove("open"); document.body.classList.remove("in-player"); $("screen").innerHTML = "";
 };
 

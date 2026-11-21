@@ -428,3 +428,6 @@ body.in-shorts{overflow:hidden}
 /* Player Drive di Home: lapisan transparan supaya tombol Google hilang saat menonton */
 .screen .ifr-shield{position:absolute;inset:0;z-index:3;display:none;cursor:pointer}
 .screen.ifr.shield .ifr-shield{display:block}
+.p-hide{height:36px;padding:0 14px;border-radius:999px;background:var(--panel2);color:var(--ink);font-size:13px;font-weight:600;margin-left:auto}
+.p-hide.on{background:var(--grad);color:var(--dark)}
+.p-hide+.p-count{margin-left:4px}
